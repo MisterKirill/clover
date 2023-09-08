@@ -4,27 +4,29 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
 	"log"
 	"net/http"
-	"os"
+
+	"github.com/gin-gonic/gin"
 )
 
-type Payload struct {
+type CreateAvatarPayload struct {
 	Success bool `json:"success"`
 	Error string `json:"error,omitempty"`
 	ErrorCode string `json:"error_code,omitempty"`
 }
 
-func CreateAvatar(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	r.ParseMultipartForm(5 << 20)
-
-	file, header, err := r.FormFile("avatar")
+func CreateAvatar(c *gin.Context) {
+	header, err := c.FormFile("avatar")
+	if err != nil {
+		log.Panic(err)
+	}
+	
+	file, err := header.Open()
 	if err != nil {
 		log.Panic(err)
 	}
@@ -41,10 +43,10 @@ func CreateAvatar(w http.ResponseWriter, r *http.Request) {
 	defer buf.Reset()
 
 	if image.Height != image.Width {
-		json.NewEncoder(w).Encode(Payload{
-			Success:   false,
-			Error:     "Bad image aspect ratio (should be 1:1)",
-			ErrorCode: "BAD_ASPECT_RATIO",
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error": "Bad image aspect ratio (should be 1:1)",
+			"error_code": "BAD_ASPECT_RATIO",
 		})
 		return
 	}
@@ -53,10 +55,10 @@ func CreateAvatar(w http.ResponseWriter, r *http.Request) {
 		contentType := header.Header.Get("Content-Type")
 
 		if contentType != "image/png" && contentType != "image/jpeg" {
-			json.NewEncoder(w).Encode(Payload{
-				Success:   false,
-				Error:     "Bad image format (only png and jpeg allowed)",
-				ErrorCode: "BAD_FORMAT",
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"error": "Bad image format (only png and jpeg allowed)",
+				"error_code": "BAD_FORMAT",
 			})
 			return
 		}
@@ -67,21 +69,12 @@ func CreateAvatar(w http.ResponseWriter, r *http.Request) {
 		log.Panic(err)
 	}
 
-	fileName := hex.EncodeToString(hash.Sum(nil))
+	avatarID := hex.EncodeToString(hash.Sum(nil))
 
-	dst, err := os.Create("avatars/" + fileName + "." + format)
-	if err != nil {
-		log.Panic(err)
-	}
+	c.SaveUploadedFile(header, "avatars/" + avatarID + "." + format)
 
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, bytes.NewReader(buf.Bytes())); err != nil {
-		log.Panic(err)
-		return
-	}
-
-	json.NewEncoder(w).Encode(Payload{
-		Success: true,
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"avatarID": avatarID,
 	})
 }
